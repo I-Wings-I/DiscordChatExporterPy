@@ -275,7 +275,8 @@ class MessageConstruct:
             if self.attachment_handler and isinstance(self.attachment_handler, AttachmentHandler):
                 a = await self.attachment_handler.process_asset(a)
             self.attachments += await Attachment(a, self.guild).flow()
-
+        if 'value=32768' in str(self.message.flags):
+            return
         for c in self.message.components:
             self.components += await Component(c, self.guild).flow()
 
