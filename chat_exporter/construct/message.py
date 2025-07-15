@@ -1,5 +1,4 @@
 import html
-import io
 import traceback
 from typing import List, Optional, Union
 

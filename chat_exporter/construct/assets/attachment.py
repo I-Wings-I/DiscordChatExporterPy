@@ -1,3 +1,4 @@
+import base64
 import math
 
 from chat_exporter.ext.discord_utils import DiscordUtils
@@ -31,19 +32,49 @@ class Attachment:
         await self.file()
 
     async def image(self):
-        self.attachments = await fill_out(self.guild, img_attachment, [
-            ("ATTACH_URL", self.attachments.proxy_url, PARSE_MODE_NONE),
-            ("ATTACH_URL_THUMB", self.attachments.proxy_url, PARSE_MODE_NONE)
-        ])
+        image_data = await self.attachments.read()
+        self.attachments.proxy_url = f"data:{self.attachments.content_type};base64,{base64.b64encode(image_data).decode('utf-8')}"
+        self.attachments.filename = self.attachments.filename if self.attachments.filename else "image.png"
+        self.attachments.size = len(image_data)
+        size_kb = self.attachments.size / 1024
+        size_mb = size_kb / 1024
+        self.attachments.size = f"{size_kb:.2f} KB" if size_kb < 1024 else f"{size_mb:.2f} MB"
+        self.attachments.width = self.attachments.width if hasattr(self.attachments, 'width') else 720
+        self.attachments.height = self.attachments.height if hasattr(self.attachments, 'height') else 480
+
+        self.attachments = await fill_out(
+            self.guild, img_attachment, [
+                ("ATTACH_URL", str(self.attachments.proxy_url), PARSE_MODE_NONE),
+                ("ATTACH_URL_THUMB", str(self.attachments.proxy_url), PARSE_MODE_NONE),
+                ("ATTACH_NAME", str(self.attachments.filename), PARSE_MODE_NONE),
+                ("ATTACH_SIZE", str(self.attachments.size), PARSE_MODE_NONE),
+                ("ATTACH_WIDTH", str(self.attachments.width), PARSE_MODE_NONE),
+                ("ATTACH_HEIGHT", str(self.attachments.height), PARSE_MODE_NONE),
+            ]
+        )
 
     async def video(self):
+        # If the video is more than 10MB, do not embed as base64, use the original URL
+        if hasattr(self.attachments, 'size') and self.attachments.size > 10 * 1024 * 1024:
+            self.attachments.proxy_url = getattr(self.attachments, 'url', None) or getattr(self.attachments, 'proxy_url', None)
+        else:
+            self.attachments.proxy_url = self.make_data_uri(
+                self.attachments.content_type,
+                await self.attachments.read()
+            )
+
         self.attachments = await fill_out(self.guild, video_attachment, [
-            ("ATTACH_URL", self.attachments.proxy_url, PARSE_MODE_NONE)
+            ("ATTACH_URL", self.attachments.proxy_url, PARSE_MODE_NONE),
         ])
 
     async def audio(self):
         file_icon = DiscordUtils.file_attachment_audio
         file_size = self.get_file_size(self.attachments.size)
+        self.attachments.proxy_url = self.make_data_uri(
+            self.attachments.content_type,
+            await self.attachments.read()
+        )
+
 
         self.attachments = await fill_out(self.guild, audio_attachment, [
             ("ATTACH_ICON", file_icon, PARSE_MODE_NONE),
@@ -55,6 +86,12 @@ class Attachment:
 
     async def file(self):
         file_icon = await self.get_file_icon()
+        # If the file is more than 10mb, we will not read it into memory
+        if not self.attachments.size > 10 * 1024 * 1024:
+            self.attachments.proxy_url = self.make_data_uri(
+                self.attachments.content_type,
+                await self.attachments.read()
+            )
 
         file_size = self.get_file_size(self.attachments.size)
 
@@ -104,3 +141,14 @@ class Attachment:
                 return DiscordUtils.file_attachment_archive
         
         return DiscordUtils.file_attachment_unknown
+    
+    @staticmethod
+    def make_data_uri(content_type: str, binary: bytes) -> str:
+        safe_type = content_type.strip().split(";")[0]
+        
+        if safe_type.startswith("text/"):
+            safe_type += ";charset=utf-8"
+
+        base64_data = base64.b64encode(binary).decode('utf-8')
+        return f"data:{safe_type};base64,{base64_data}"
+
